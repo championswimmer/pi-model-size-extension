@@ -146,6 +146,31 @@ End skill mode and restore the original model:
 
 ## How It Works
 
+```mermaid
+sequenceDiagram
+    actor User
+    participant PI as Pi Agent
+    participant Large as Large Model<br/>(claude-opus-4)
+    participant Small as Small Model<br/>(claude-3-5-haiku)
+    participant Git as /git Skill<br/>(model_size: small)
+
+    User->>PI: Write a REST API
+    PI->>Large: Generate code
+    Large-->>PI: API implementation
+    PI-->>User: Here's your REST API...
+
+    User->>PI: /git:commit-push
+    PI->>Git: Load skill
+    Git->>Git: Parse model_size: small
+    Git->>PI: Switch to small model
+    Note over PI: Saves original model<br/>(claude-opus-4)
+    PI->>Small: Commit & push
+    Small-->>PI: Done! Committed & pushed
+    PI->>PI: Restore original model
+    Note over PI: Restores claude-opus-4
+    PI-->>User: Changes committed and pushed
+```
+
 1. **Skill Detection**: On `input` event, the extension checks for `/skill:xxx` commands
 2. **Frontmatter Parsing**: If a skill file is found, it parses the YAML frontmatter for `model_size`
 3. **Model Matching**: Finds the first available model matching the requested size
