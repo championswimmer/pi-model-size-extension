@@ -612,11 +612,15 @@ export default function modelSizeExtension(pi: ExtensionAPI) {
 		description: "Set preferred model for a size category (e.g., /set-model-size small claude-haiku-4-5)",
 		getArgumentCompletions: (prefix: string, fullArgs?: string): Array<{ value: string; label: string; description?: string }> => {
 			const args = fullArgs ?? "";
+			const validSizes = ["small", "medium", "large", "S", "M", "L"];
+			const firstWord = args.split(/\s+/)[0]?.toLowerCase() || "";
 			
-			// First argument: size (no space in args, or just starting)
-			if (!args.includes(" ")) {
-				const sizes = ["small", "medium", "large", "S", "M", "L"];
-				const filtered = sizes.filter((s) => s.toLowerCase().startsWith(prefix.toLowerCase()));
+			// Check if first word is a valid size
+			const isValidSize = validSizes.some(s => s.toLowerCase() === firstWord);
+			
+			// First argument: size (no space AND first word is not a complete valid size)
+			if (!args.includes(" ") && !isValidSize) {
+				const filtered = validSizes.filter((s) => s.toLowerCase().startsWith(prefix.toLowerCase()));
 				return filtered.map((s) => ({ value: s, label: s }));
 			}
 			
@@ -633,6 +637,7 @@ export default function modelSizeExtension(pi: ExtensionAPI) {
 			const modelPrefix = parts.slice(1).join(" ").toLowerCase() || prefix.toLowerCase();
 			
 			// Filter cached models by size and prefix
+			// Note: cachedModels is populated during session_start
 			const matchingModels = state.cachedModels.filter((model) => {
 				const size = getModelSize(model);
 				if (size !== targetSize) return false;
