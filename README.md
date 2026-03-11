@@ -5,9 +5,10 @@ A [pi](https://github.com/badlogic/pi-mono) extension that enables automatic mod
 ## Features
 
 - **Skill-based model switching**: Skills can specify a preferred model size (`small`, `medium`, or `large`) in their frontmatter
+- **Prompt prefix switching**: Use `/w:S`, `/w:M`, `/w:L` prefix to temporarily switch models for a single prompt
 - **Automatic size detection**: Known model patterns are automatically classified (e.g., `gpt-*mini`, `haiku`, `gemini-*flash` → small)
 - **Custom size overrides**: Models can have custom size assignments in `models.json`
-- **Automatic restoration**: Original model is restored after skill execution completes
+- **Automatic restoration**: Original model is restored after skill execution or prompt completes
 - **Manual control**: Commands to view and set model size preferences
 
 ## Installation
@@ -138,13 +139,97 @@ Shorthand also works: `/set-model-size S`, `/set-model-size M`, `/set-model-size
 
 #### `/end-skill`
 
-End skill mode and restore the original model:
+End skill/prompt mode and restore the original model:
 
 ```
 /end-skill
 ```
 
+### Prompt Prefix for Model Selection
+
+You can prefix any prompt with `/w:S`, `/w:M`, or `/w:L` to temporarily use a small, medium, or large model for that specific prompt. The original model is automatically restored after the response completes.
+
+```
+/w:S <prompt>    → Uses small model
+/w:M <prompt>    → Uses medium model
+/w:L <prompt>    → Uses large model
+```
+
+#### Small Model Examples (`/w:S`)
+
+Best for quick, simple tasks where speed matters more than depth:
+
+```bash
+# Quick formatting
+/w:S format this JSON file
+
+# Simple summaries
+/w:S summarize this error message in one sentence
+
+# Boilerplate generation
+/w:S create a basic Express.js route for GET /users
+
+# Quick explanations
+/w:S what does this regex do: /^[a-z]+$/
+
+# Simple conversions
+/w:S convert this timestamp to ISO format: 1709877600
+
+# Quick fixes
+/w:S fix the syntax error in this line: const x = {a: 1, b: 2,}
+```
+
+#### Medium Model Examples (`/w:M`)
+
+Best for balanced tasks requiring moderate reasoning:
+
+```bash
+# Standard coding tasks
+/w:M implement a rate limiter middleware for Express.js
+
+# Code review
+/w:M review this function for best practices and suggest improvements
+
+# Documentation
+/w:M write JSDoc comments for this API module
+
+# Refactoring
+/w:M refactor this code to use async/await instead of promises
+
+# Testing
+/w:M write unit tests for this utility function
+
+# Debugging
+/w:M help me debug why this async function hangs sometimes
+```
+
+#### Large Model Examples (`/w:L`)
+
+Best for complex tasks requiring deep analysis and reasoning:
+
+```bash
+# Architecture design
+/w:L design a microservices architecture for an e-commerce platform
+
+# Complex refactoring
+/w:L refactor this monolithic API into separate service layers
+
+# Security review
+/w:L perform a security audit of this authentication module
+
+# Performance optimization
+/w:L analyze and optimize this database-heavy application for scale
+
+# Multi-file analysis
+/w:L analyze the dependencies between all files in this project
+
+# Complex problem solving
+/w:L help me design a distributed caching strategy for a global application
+```
+
 ## How It Works
+
+### Skill-based Model Switching
 
 ```mermaid
 sequenceDiagram
@@ -171,11 +256,36 @@ sequenceDiagram
     PI-->>User: Changes committed and pushed
 ```
 
+### Prompt Prefix Model Switching
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant PI as Pi Agent
+    participant Large as Large Model<br/>(claude-opus-4)
+    participant Small as Small Model<br/>(claude-3-5-haiku)
+
+    User->>PI: /w:S summarize this file
+    PI->>PI: Detect /w:S prefix
+    PI->>PI: Save current model<br/>(claude-opus-4)
+    PI->>PI: Switch to small model
+    PI->>Small: Summarize file
+    Small-->>PI: File summary
+    PI->>PI: Restore original model
+    Note over PI: Restores claude-opus-4
+    PI-->>User: Here's the summary...
+
+    User->>PI: Continue with next task
+    Note over PI: Uses original model<br/>(claude-opus-4)
+    PI->>Large: Process next task
+```
+
 1. **Skill Detection**: On `input` event, the extension checks for `/skill:xxx` commands
-2. **Frontmatter Parsing**: If a skill file is found, it parses the YAML frontmatter for `model_size`
-3. **Model Matching**: Finds the first available model matching the requested size
-4. **Model Switching**: Saves the current model and switches to the size-appropriate model
-5. **Restoration**: On `agent_end` (when no pending messages), restores the original model
+2. **Prefix Detection**: Also checks for `/w:S`, `/w:M`, `/w:L` prefixes in prompts
+3. **Frontmatter Parsing**: If a skill file is found, it parses the YAML frontmatter for `model_size`
+4. **Model Matching**: Finds the first available model matching the requested size
+5. **Model Switching**: Saves the current model and switches to the size-appropriate model
+6. **Restoration**: On `agent_end` (when no pending messages), restores the original model
 
 ## Example Skill
 

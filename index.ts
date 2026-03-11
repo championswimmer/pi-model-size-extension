@@ -10,6 +10,7 @@
  * - Default size detection for known models (gpt-mini, haiku, gemini-flash → small, etc.)
  * - Automatic model switching when skill is loaded via `/skill:abc`
  * - Automatic restoration of original model when skill execution ends
+ * - Prompt prefix `/w:S` or `/w:L` to use small or large model for a single prompt
  *
  * Usage in skill frontmatter:
  * ---
@@ -17,6 +18,11 @@
  * description: A skill that works best with small models
  * model_size: small
  * ---
+ *
+ * Usage in prompts:
+ * /w:S explain this code briefly    → Uses small model
+ * /w:L analyze this architecture    → Uses large model
+ * /w:M balance speed and quality    → Uses medium model
  *
  * Usage in models.json for custom model size override:
  * {
@@ -199,6 +205,8 @@ interface ModelState {
 	inSkillMode: boolean;
 	// The size preference of the current skill
 	skillSize: ModelSize | null;
+	// Whether we're currently in prompt mode (via /w:S or /w:L)
+	inPromptMode: boolean;
 }
 
 export default function modelSizeExtension(pi: ExtensionAPI) {
@@ -207,6 +215,7 @@ export default function modelSizeExtension(pi: ExtensionAPI) {
 		originalModel: null,
 		inSkillMode: false,
 		skillSize: null,
+		inPromptMode: false,
 	};
 
 	// Model size registry
@@ -253,11 +262,43 @@ export default function modelSizeExtension(pi: ExtensionAPI) {
 		}
 	});
 
-	// Intercept input to detect skill loading
+	// Intercept input to detect skill loading or model size prefix
 	pi.on("input", async (event, ctx) => {
 		// Only process interactive input
 		if (event.source !== "interactive") {
 			return { action: "continue" };
+		}
+
+		// Check for /w:S or /w:L prefix (with small/large model)
+		const withSizeMatch = event.text.match(/^\/w:([SMLsml])(?:\s+)?(.*)/s);
+		if (withSizeMatch) {
+			const sizeChar = withSizeMatch[1];
+			const remainingText = withSizeMatch[2];
+
+			const targetSize = normalizeSize(sizeChar);
+			if (targetSize) {
+				// Find a model of the target size
+				const targetModel = await findModelOfSize(targetSize, ctx);
+				if (targetModel) {
+					// Save current model
+					const currentModel = ctx.model;
+					if (currentModel) {
+						state.originalModel = currentModel;
+					}
+
+					// Switch to target model
+					const success = await pi.setModel(targetModel);
+					if (success) {
+						state.inPromptMode = true;
+						ctx.ui.notify(`Using ${targetModel.provider}/${targetModel.id} (${targetSize})`, "info");
+					}
+				} else {
+					ctx.ui.notify(`No model of size "${targetSize}" available`, "warning");
+				}
+			}
+
+			// Return the remaining text (stripped of /w:X prefix)
+			return { action: "continue", text: remainingText };
 		}
 
 		// Check for /skill:xxx pattern
@@ -350,14 +391,14 @@ export default function modelSizeExtension(pi: ExtensionAPI) {
 		}
 	}
 
-	// Restore original model after skill execution ends
+	// Restore original model after skill execution or prompt with size ends
 	// Only restore when there are no pending messages (user hasn't queued follow-ups)
 	pi.on("agent_end", async (_event, ctx) => {
-		if (state.inSkillMode && state.originalModel) {
+		if ((state.inSkillMode || state.inPromptMode) && state.originalModel) {
 			// Check if there are pending follow-up messages
-			// If so, don't restore yet - the skill task is still ongoing
+			// If so, don't restore yet - the task is still ongoing
 			if (ctx.hasPendingMessages()) {
-				console.log(`[model-size] Keeping skill model for pending messages`);
+				console.log(`[model-size] Keeping switched model for pending messages`);
 				return;
 			}
 
@@ -371,6 +412,7 @@ export default function modelSizeExtension(pi: ExtensionAPI) {
 			state.originalModel = null;
 			state.inSkillMode = false;
 			state.skillSize = null;
+			state.inPromptMode = false;
 		}
 	});
 
@@ -440,12 +482,12 @@ export default function modelSizeExtension(pi: ExtensionAPI) {
 		},
 	});
 
-	// Register command to end skill mode and restore original model
+	// Register command to end skill/prompt mode and restore original model
 	pi.registerCommand("end-skill", {
-		description: "End skill mode and restore the original model",
+		description: "End skill/prompt mode and restore the original model",
 		handler: async (_args, ctx) => {
-			if (!state.inSkillMode) {
-				ctx.ui.notify("Not in skill mode", "warning");
+			if (!state.inSkillMode && !state.inPromptMode) {
+				ctx.ui.notify("Not in skill or prompt mode", "warning");
 				return;
 			}
 
@@ -459,6 +501,7 @@ export default function modelSizeExtension(pi: ExtensionAPI) {
 			state.originalModel = null;
 			state.inSkillMode = false;
 			state.skillSize = null;
+			state.inPromptMode = false;
 		},
 	});
 }
