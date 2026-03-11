@@ -101,10 +101,12 @@ function inferModelSize(model: Model): ModelSize {
 	return "medium";
 }
 
-// Model size registry - stores custom size overrides
+// Model size registry - stores custom size overrides and preferred models
 interface ModelSizeRegistry {
 	// Custom overrides from models.json
 	customSizes: Map<string, ModelSize>;
+	// User's preferred models for each size (persisted)
+	preferredModels: Map<ModelSize, string>; // size -> "provider/modelId"
 }
 
 // Parse models.json for custom size overrides
@@ -152,6 +154,59 @@ function loadCustomModelSizes(agentDir: string): Map<string, ModelSize> {
 	}
 
 	return customSizes;
+}
+
+// Load preferred models from JSON file
+function loadPreferredModels(agentDir: string): Map<ModelSize, string> {
+	const preferredModels = new Map<ModelSize, string>();
+
+	const prefsPath = path.join(agentDir, "model-preferences.json");
+	if (!fs.existsSync(prefsPath)) {
+		return preferredModels;
+	}
+
+	try {
+		const content = fs.readFileSync(prefsPath, "utf-8");
+		const prefs = JSON.parse(content);
+
+		if (prefs.preferredModels) {
+			for (const [size, modelRef] of Object.entries(prefs.preferredModels as Record<string, string>)) {
+				const normalizedSize = normalizeSize(size);
+				if (normalizedSize && typeof modelRef === "string") {
+					preferredModels.set(normalizedSize, modelRef);
+				}
+			}
+		}
+	} catch (error) {
+		// Silently ignore parse errors
+	}
+
+	return preferredModels;
+}
+
+// Save preferred models to JSON file
+function savePreferredModels(agentDir: string, preferredModels: Map<ModelSize, string>): void {
+	const prefsPath = path.join(agentDir, "model-preferences.json");
+
+	try {
+		// Ensure directory exists
+		const dir = path.dirname(prefsPath);
+		if (!fs.existsSync(dir)) {
+			fs.mkdirSync(dir, { recursive: true });
+		}
+
+		const prefs: Record<string, any> = {
+			preferredModels: {}
+		};
+
+		for (const [size, modelRef] of preferredModels) {
+			prefs.preferredModels[size] = modelRef;
+		}
+
+		fs.writeFileSync(prefsPath, JSON.stringify(prefs, null, 2));
+	} catch (error) {
+		console.error(`[model-size] Failed to save preferred models: ${error}`);
+	}
 }
 
 // Skill frontmatter interface
@@ -221,6 +276,7 @@ export default function modelSizeExtension(pi: ExtensionAPI) {
 	// Model size registry
 	const registry: ModelSizeRegistry = {
 		customSizes: new Map(),
+		preferredModels: new Map(),
 	};
 
 	// Get the effective size for a model
@@ -240,6 +296,20 @@ export default function modelSizeExtension(pi: ExtensionAPI) {
 	): Promise<Model | null> {
 		const available = await ctx.modelRegistry.getAvailable();
 
+		// Check if there's a preferred model for this size
+		const preferredRef = registry.preferredModels.get(targetSize);
+		if (preferredRef) {
+			const [provider, ...modelIdParts] = preferredRef.split("/");
+			const modelId = modelIdParts.join("/");
+			const preferredModel = available.find(
+				(m) => m.provider === provider && m.id === modelId
+			);
+			if (preferredModel) {
+				return preferredModel;
+			}
+			// If preferred model not found, fall through to first match
+		}
+
 		// Filter models by size
 		const matchingModels = available.filter((model) => {
 			const size = getModelSize(model);
@@ -252,13 +322,25 @@ export default function modelSizeExtension(pi: ExtensionAPI) {
 
 	// Load custom model sizes on session start
 	pi.on("session_start", async (_event, ctx) => {
-		// Load custom sizes from models.json
 		const agentDir = process.env.PI_CODING_AGENT_DIR || path.join(process.env.HOME || "", ".pi", "agent");
+		
+		// Load custom sizes from models.json
 		registry.customSizes = loadCustomModelSizes(agentDir);
+
+		// Load preferred models from model-preferences.json
+		registry.preferredModels = loadPreferredModels(agentDir);
 
 		// Log loaded custom sizes
 		if (registry.customSizes.size > 0) {
 			console.log(`[model-size] Loaded ${registry.customSizes.size} custom model size overrides`);
+		}
+
+		// Log preferred models
+		if (registry.preferredModels.size > 0) {
+			const prefs = Array.from(registry.preferredModels.entries())
+				.map(([size, ref]) => `${size}: ${ref}`)
+				.join(", ");
+			console.log(`[model-size] Preferred models: ${prefs}`);
 		}
 	});
 
@@ -476,7 +558,7 @@ export default function modelSizeExtension(pi: ExtensionAPI) {
 
 	// Register command to show current model size
 	pi.registerCommand("model-size", {
-		description: "Show the current model size and available models by size",
+		description: "Show the current model size, preferred models, and available models by size",
 		handler: async (_args, ctx) => {
 			const currentModel = ctx.model;
 			if (!currentModel) {
@@ -501,7 +583,16 @@ export default function modelSizeExtension(pi: ExtensionAPI) {
 
 			// Build status message
 			let message = `Current: ${currentModel.provider}/${currentModel.id} (${currentSize})\n\n`;
-			message += `Available models by size:\n`;
+			
+			// Show preferred models
+			message += `Preferred models:\n`;
+			for (const size of ["small", "medium", "large"] as ModelSize[]) {
+				const preferred = registry.preferredModels.get(size);
+				const marker = preferred ? `→ ${preferred}` : "(not set)";
+				message += `  ${size}: ${marker}\n`;
+			}
+			
+			message += `\nAvailable models by size:\n`;
 			message += `\nSmall:\n${bySize.small.map((m) => `  ${m.provider}/${m.id}`).join("\n") || "  (none)"}\n`;
 			message += `\nMedium:\n${bySize.medium.map((m) => `  ${m.provider}/${m.id}`).join("\n") || "  (none)"}\n`;
 			message += `\nLarge:\n${bySize.large.map((m) => `  ${m.provider}/${m.id}`).join("\n") || "  (none)"}`;
@@ -510,33 +601,139 @@ export default function modelSizeExtension(pi: ExtensionAPI) {
 		},
 	});
 
-	// Register command to manually set model size preference
+	// Register command to set preferred model for a size
 	pi.registerCommand("set-model-size", {
-		description: "Set model size preference for current session (small/medium/large or S/M/L)",
-		getArgumentCompletions: (prefix: string) => {
-			const sizes = ["small", "medium", "large", "S", "M", "L"];
-			const filtered = sizes.filter((s) => s.toLowerCase().startsWith(prefix.toLowerCase()));
-			return filtered.map((s) => ({ value: s, label: s }));
+		description: "Set preferred model for a size category (e.g., /set-model-size small claude-haiku-4-5)",
+		getArgumentCompletions: async (prefix: string, fullArgs: string, ctx: ExtensionContext) => {
+			const args = fullArgs.trim();
+			const parts = args.split(/\s+/);
+			
+			// First argument: size
+			if (parts.length === 0 || (parts.length === 1 && !args.includes(" "))) {
+				const sizes = ["small", "medium", "large", "S", "M", "L"];
+				const filtered = sizes.filter((s) => s.toLowerCase().startsWith(prefix.toLowerCase()));
+				return filtered.map((s) => ({ value: s, label: s }));
+			}
+			
+			// Second argument: model name
+			if (parts.length >= 1) {
+				const sizeInput = parts[0];
+				const targetSize = normalizeSize(sizeInput);
+				
+				if (!targetSize) {
+					return [];
+				}
+				
+				// Get available models of this size
+				const available = await ctx.modelRegistry.getAvailable();
+				const matchingModels = available.filter((model) => {
+					const size = getModelSize(model);
+					return size === targetSize;
+				});
+				
+				// Model prefix is everything after the size and space
+				const modelPrefix = parts.slice(1).join(" ").toLowerCase();
+				
+				const completions = matchingModels
+					.filter((m) => {
+						const ref = `${m.provider}/${m.id}`.toLowerCase();
+						return ref.includes(modelPrefix) || m.id.toLowerCase().includes(modelPrefix);
+					})
+					.map((m) => ({
+						value: `${m.provider}/${m.id}`,
+						label: `${m.provider}/${m.id}`,
+						description: m.name || m.id,
+					}));
+				
+				return completions;
+			}
+			
+			return [];
 		},
 		handler: async (args, ctx) => {
-			const sizeInput = args.trim();
+			const parts = args.trim().split(/\s+/);
+			
+			if (parts.length < 2) {
+				ctx.ui.notify(
+					"Usage: /set-model-size <size> <model>\n" +
+					"Size: small, medium, large (or S, M, L)\n" +
+					"Example: /set-model-size small claude-haiku-4-5",
+					"info"
+				);
+				return;
+			}
+			
+			const sizeInput = parts[0];
+			const modelRef = parts.slice(1).join(" "); // Handle model names with spaces
+			
 			const targetSize = normalizeSize(sizeInput);
-
+			
 			if (!targetSize) {
-				ctx.ui.notify("Usage: /set-model-size <small|medium|large>", "warning");
+				ctx.ui.notify(`Invalid size: ${sizeInput}. Use small, medium, or large.`, "warning");
 				return;
 			}
-
-			const targetModel = await findModelOfSize(targetSize, ctx);
+			
+			// Parse model reference (provider/modelId or just modelId)
+			let provider: string | undefined;
+			let modelId: string;
+			
+			if (modelRef.includes("/")) {
+				const slashIndex = modelRef.indexOf("/");
+				provider = modelRef.slice(0, slashIndex);
+				modelId = modelRef.slice(slashIndex + 1);
+			} else {
+				modelId = modelRef;
+			}
+			
+			// Find the model in available models
+			const available = await ctx.modelRegistry.getAvailable();
+			let targetModel: Model | undefined;
+			
+			if (provider) {
+				targetModel = available.find((m) => m.provider === provider && m.id === modelId);
+			} else {
+				// Try to find by model ID alone
+				const matches = available.filter((m) => m.id === modelId);
+				if (matches.length === 1) {
+					targetModel = matches[0];
+				} else if (matches.length > 1) {
+					ctx.ui.notify(
+						`Multiple providers for model "${modelId}". Use provider/modelId format.\n` +
+						`Available: ${matches.map((m) => `${m.provider}/${m.id}`).join(", ")}`,
+						"warning"
+					);
+					return;
+				}
+			}
+			
 			if (!targetModel) {
-				ctx.ui.notify(`No model of size "${targetSize}" available`, "error");
+				ctx.ui.notify(`Model not found: ${modelRef}`, "error");
 				return;
 			}
-
-			const success = await pi.setModel(targetModel);
-			if (success) {
-				ctx.ui.notify(`Switched to ${targetModel.provider}/${targetModel.id} (${targetSize})`, "info");
+			
+			// Verify the model matches the target size (or warn)
+			const actualSize = getModelSize(targetModel);
+			if (actualSize !== targetSize) {
+				ctx.ui.notify(
+					`Warning: ${targetModel.provider}/${targetModel.id} is detected as "${actualSize}", not "${targetSize}".\n` +
+					`Setting as preferred ${targetSize} model anyway.`,
+					"warning"
+				);
 			}
+			
+			// Set as preferred model for this size
+			const fullRef = `${targetModel.provider}/${targetModel.id}`;
+			registry.preferredModels.set(targetSize, fullRef);
+			
+			// Persist to file
+			const agentDir = process.env.PI_CODING_AGENT_DIR || path.join(process.env.HOME || "", ".pi", "agent");
+			savePreferredModels(agentDir, registry.preferredModels);
+			
+			ctx.ui.notify(
+				`Set preferred ${targetSize} model: ${fullRef}\n` +
+				`This will be used when selecting ${targetSize} models.`,
+				"info"
+			);
 		},
 	});
 

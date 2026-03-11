@@ -6,6 +6,7 @@ A [pi](https://github.com/badlogic/pi-mono) extension that enables automatic mod
 
 - **Skill-based model switching**: Skills can specify a preferred model size (`small`, `medium`, or `large`) in their frontmatter
 - **Prompt prefix switching**: Use `/w:S`, `/w:M`, `/w:L` prefix to temporarily switch models for a single prompt
+- **Preferred models per size**: Set your preferred model for each size category with `/set-model-size`
 - **Automatic size detection**: Known model patterns are automatically classified (e.g., `gpt-*mini`, `haiku`, `gemini-*flash` → small)
 - **Custom size overrides**: Models can have custom size assignments in `models.json`
 - **Automatic restoration**: Original model is restored after skill execution or prompt completes
@@ -95,11 +96,27 @@ Add size overrides in `~/.pi/agent/models.json`:
 }
 ```
 
+#### Preferred Models
+
+Set your preferred model for each size category using `/set-model-size`. This preference is stored in `~/.pi/agent/model-preferences.json`:
+
+```json
+{
+  "preferredModels": {
+    "small": "anthropic/claude-haiku-4-5",
+    "medium": "anthropic/claude-sonnet-4",
+    "large": "anthropic/claude-opus-4"
+  }
+}
+```
+
+When a size is requested (via skills, `/w:S`, etc.), your preferred model for that size is used. If no preferred model is set, the first available model of that size is selected automatically.
+
 ### Commands
 
 #### `/model-size`
 
-Show current model size and list available models by size:
+Show current model size, preferred models, and list available models by size:
 
 ```
 /model-size
@@ -109,10 +126,15 @@ Output:
 ```
 Current: anthropic/claude-sonnet-4 (medium)
 
+Preferred models:
+  small: → anthropic/claude-haiku-4-5
+  medium: → anthropic/claude-sonnet-4
+  large: (not set)
+
 Available models by size:
 
 Small:
-  anthropic/claude-3-5-haiku
+  anthropic/claude-haiku-4-5
   openai/gpt-4o-mini
   google/gemini-2.0-flash
 
@@ -125,17 +147,35 @@ Large:
   openai/gpt-4-turbo
 ```
 
-#### `/set-model-size <size>`
+#### `/set-model-size <size> <model>`
 
-Manually switch to a model of the specified size:
+Set your preferred model for a size category. When you use `/w:S`, load a skill with `model_size: small`, or request a small model, your preferred model will be used instead of the default first match.
 
 ```
-/set-model-size small
-/set-model-size medium
-/set-model-size large
+/set-model-size small anthropic/claude-haiku-4-5
+/set-model-size medium anthropic/claude-sonnet-4
+/set-model-size large anthropic/claude-opus-4
 ```
 
-Shorthand also works: `/set-model-size S`, `/set-model-size M`, `/set-model-size L`
+**Features:**
+- **Autocomplete**: Type `/set-model-size ` and get size suggestions (small/medium/large)
+- **Model autocomplete**: After selecting a size, get model suggestions filtered to that size category
+- **Persistence**: Preferred models are saved to `~/.pi/agent/model-preferences.json`
+- **Fallback**: If no preferred model is set for a size, the first available model of that size is used
+
+**Examples:**
+```bash
+# Set claude-haiku-4-5 as preferred small model
+/set-model-size small anthropic/claude-haiku-4-5
+
+# Set claude-sonnet-4 as preferred medium model
+/set-model-size medium anthropic/claude-sonnet-4
+
+# You can also use shorthand size (S/M/L)
+/set-model-size S claude-haiku-4-5
+```
+
+**Note:** If you specify a model that doesn't match the detected size category, you'll get a warning but the preference will still be saved. This allows flexibility for custom model configurations.
 
 #### `/end-skill`
 
