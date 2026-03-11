@@ -416,6 +416,64 @@ export default function modelSizeExtension(pi: ExtensionAPI) {
 		}
 	});
 
+	// Register /w command for autocomplete (supports both /w:S prompt and /w S prompt)
+	pi.registerCommand("w", {
+		description: "Use a specific model size for this prompt (S/M/L)",
+		getArgumentCompletions: (prefix: string) => {
+			const sizes = [
+				{ value: "S", label: "S - small model (fast)" },
+				{ value: "M", label: "M - medium model (balanced)" },
+				{ value: "L", label: "L - large model (capable)" },
+			];
+			return sizes.filter((s) => s.value.toLowerCase().startsWith(prefix.toLowerCase()));
+		},
+		handler: async (args, ctx) => {
+			// Parse args: could be "S some prompt" or "S:some prompt"
+			const match = args.match(/^([SMLsml])[:\s]\s*(.*)/s);
+			if (!match) {
+				ctx.ui.notify(
+					"Usage: /w:S <prompt>, /w:M <prompt>, or /w:L <prompt>\n" +
+					"Example: /w:S explain this code briefly",
+					"info"
+				);
+				return;
+			}
+
+			const sizeChar = match[1];
+			const remainingText = match[2];
+
+			const targetSize = normalizeSize(sizeChar);
+			if (!targetSize) {
+				ctx.ui.notify("Invalid size. Use S, M, or L.", "warning");
+				return;
+			}
+
+			const targetModel = await findModelOfSize(targetSize, ctx);
+			if (!targetModel) {
+				ctx.ui.notify(`No model of size "${targetSize}" available`, "warning");
+				return;
+			}
+
+			// Save current model
+			const currentModel = ctx.model;
+			if (currentModel) {
+				state.originalModel = currentModel;
+			}
+
+			// Switch to target model
+			const success = await pi.setModel(targetModel);
+			if (success) {
+				state.inPromptMode = true;
+				ctx.ui.notify(`Using ${targetModel.provider}/${targetModel.id} (${targetSize})`, "info");
+			}
+
+			// Send the remaining text as a user message
+			if (remainingText.trim()) {
+				pi.sendUserMessage(remainingText.trim(), { deliverAs: "steer" });
+			}
+		},
+	});
+
 	// Register command to show current model size
 	pi.registerCommand("model-size", {
 		description: "Show the current model size and available models by size",
