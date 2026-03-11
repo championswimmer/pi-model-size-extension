@@ -604,8 +604,8 @@ export default function modelSizeExtension(pi: ExtensionAPI) {
 	// Register command to set preferred model for a size
 	pi.registerCommand("set-model-size", {
 		description: "Set preferred model for a size category (e.g., /set-model-size small claude-haiku-4-5)",
-		getArgumentCompletions: async (prefix: string, fullArgs: string, ctx: ExtensionContext) => {
-			const args = fullArgs.trim();
+		getArgumentCompletions: async (prefix: string, fullArgs: string | undefined, ctx: ExtensionContext) => {
+			const args = (fullArgs ?? "").trim();
 			const parts = args.split(/\s+/);
 			
 			// First argument: size
