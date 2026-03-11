@@ -262,6 +262,8 @@ interface ModelState {
 	skillSize: ModelSize | null;
 	// Whether we're currently in prompt mode (via /w:S or /w:L)
 	inPromptMode: boolean;
+	// Cached available models for autocomplete
+	cachedModels: Model[];
 }
 
 export default function modelSizeExtension(pi: ExtensionAPI) {
@@ -271,6 +273,7 @@ export default function modelSizeExtension(pi: ExtensionAPI) {
 		inSkillMode: false,
 		skillSize: null,
 		inPromptMode: false,
+		cachedModels: [],
 	};
 
 	// Model size registry
@@ -329,6 +332,9 @@ export default function modelSizeExtension(pi: ExtensionAPI) {
 
 		// Load preferred models from model-preferences.json
 		registry.preferredModels = loadPreferredModels(agentDir);
+
+		// Cache available models for autocomplete
+		state.cachedModels = await ctx.modelRegistry.getAvailable();
 
 		// Log loaded custom sizes
 		if (registry.customSizes.size > 0) {
@@ -604,51 +610,42 @@ export default function modelSizeExtension(pi: ExtensionAPI) {
 	// Register command to set preferred model for a size
 	pi.registerCommand("set-model-size", {
 		description: "Set preferred model for a size category (e.g., /set-model-size small claude-haiku-4-5)",
-		getArgumentCompletions: async (prefix: string, fullArgs: string | undefined, ctx: ExtensionContext) => {
-			const args = (fullArgs ?? "").trim();
-			const parts = args.split(/\s+/);
+		getArgumentCompletions: (prefix: string, fullArgs?: string): Array<{ value: string; label: string; description?: string }> => {
+			const args = fullArgs ?? "";
 			
-			// First argument: size
-			if (parts.length === 0 || (parts.length === 1 && !args.includes(" "))) {
+			// First argument: size (no space in args, or just starting)
+			if (!args.includes(" ")) {
 				const sizes = ["small", "medium", "large", "S", "M", "L"];
 				const filtered = sizes.filter((s) => s.toLowerCase().startsWith(prefix.toLowerCase()));
 				return filtered.map((s) => ({ value: s, label: s }));
 			}
 			
 			// Second argument: model name
-			if (parts.length >= 1) {
-				const sizeInput = parts[0];
-				const targetSize = normalizeSize(sizeInput);
-				
-				if (!targetSize) {
-					return [];
-				}
-				
-				// Get available models of this size
-				const available = await ctx.modelRegistry.getAvailable();
-				const matchingModels = available.filter((model) => {
-					const size = getModelSize(model);
-					return size === targetSize;
-				});
-				
-				// Model prefix is everything after the size and space
-				const modelPrefix = parts.slice(1).join(" ").toLowerCase();
-				
-				const completions = matchingModels
-					.filter((m) => {
-						const ref = `${m.provider}/${m.id}`.toLowerCase();
-						return ref.includes(modelPrefix) || m.id.toLowerCase().includes(modelPrefix);
-					})
-					.map((m) => ({
-						value: `${m.provider}/${m.id}`,
-						label: `${m.provider}/${m.id}`,
-						description: m.name || m.id,
-					}));
-				
-				return completions;
+			const parts = args.split(/\s+/);
+			const sizeInput = parts[0] || "";
+			const targetSize = normalizeSize(sizeInput);
+			
+			if (!targetSize) {
+				return [];
 			}
 			
-			return [];
+			// Get model prefix (everything after size)
+			const modelPrefix = parts.slice(1).join(" ").toLowerCase() || prefix.toLowerCase();
+			
+			// Filter cached models by size and prefix
+			const matchingModels = state.cachedModels.filter((model) => {
+				const size = getModelSize(model);
+				if (size !== targetSize) return false;
+				
+				const ref = `${model.provider}/${model.id}`.toLowerCase();
+				return ref.includes(modelPrefix) || model.id.toLowerCase().includes(modelPrefix);
+			});
+			
+			return matchingModels.map((m) => ({
+				value: `${m.provider}/${m.id}`,
+				label: `${m.provider}/${m.id}`,
+				description: m.name || m.id,
+			}));
 		},
 		handler: async (args, ctx) => {
 			const parts = args.trim().split(/\s+/);
