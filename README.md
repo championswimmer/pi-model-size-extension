@@ -15,7 +15,7 @@ A [pi](https://github.com/badlogic/pi-mono) extension that enables automatic mod
 ### Option 1: Pi Package (Recommended)
 
 ```bash
-pi install git:github.com/your-username/pi-model-size-extension
+pi install https://github.com/championswimmer/pi-model-size-extension
 ```
 
 ### Option 2: Manual Installation
