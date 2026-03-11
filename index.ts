@@ -48,25 +48,26 @@ function normalizeSize(size: string): ModelSize | null {
 }
 
 // Default model size patterns
+// Note: Using word boundaries (\b) to avoid matching substrings (e.g., "mini" in "gemini")
 const DEFAULT_SMALL_PATTERNS = [
-	/mini/i,
-	/haiku/i,
-	/flash/i,
-	/turbo/i,
-	/instant/i,
-	/lite/i,
-	/tiny/i,
+	/\bmini\b/i,
+	/\bhaiku\b/i,
+	/\bflash\b/i,
+	/\bturbo\b/i,
+	/\binstant\b/i,
+	/\blite\b/i,
+	/\btiny\b/i,
 	/\bnano\b/i,
 	/\bsmall\b/i,
 ];
 
 const DEFAULT_LARGE_PATTERNS = [
-	/opus/i,
-	/o1/i,
-	/o3/i,
-	/ultra/i,
-	/max/i,
-	/pro/i,
+	/\bopus\b/i,
+	/\bo1\b/i,
+	/\bo3\b/i,
+	/\bultra\b/i,
+	/\bmax\b/i,
+	/\bpro\b/i,
 	/\blarge\b/i,
 	/\bbig\b/i,
 ];
