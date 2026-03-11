@@ -1,0 +1,14 @@
+{
+  "name": "pi-model-size-extension",
+  "version": "1.0.0",
+  "description": "Pi extension for automatic model size selection based on skill requirements",
+  "main": "index.ts",
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": ">=1.0.0",
+    "@mariozechner/pi-ai": ">=1.0.0"
+  }
+}
